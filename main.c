@@ -92,7 +92,7 @@ int load_firm(u8* p, size_t len) {
                    hdr->segments[i].size);
             break;
         case 2:
-            memcpy(ram+hdr->segments[i].base+RAM_SIZE/2, p+hdr->segments[i].offset,
+            memcpy(ram+hdr->segments[i].base+RAM_SIZE/4, p+hdr->segments[i].offset,
                    hdr->segments[i].size);
             break;
         default:
