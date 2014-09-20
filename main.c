@@ -125,7 +125,12 @@ struct {
     u16 dvm; // HW breakpoint for data accesses. Debug register. Also used for TRAP/BI routine.
     u16 ext[4]; // External registers..
 
+    u16 pp; // is this same as p reg?
+
 } r; // registers
+
+#define ARITHMETIC_SHIFTMODE (r.st2 & (1<<7))
+
 
 typedef struct {
     u8 rsa[0x100];
@@ -155,11 +160,34 @@ u32 data_mappings[8];
 u32 prog_mappings[8];
 
 
+/* cpu status */
+int get_z() { return r.st0 & (1<<11); }
+void set_z() { r.st0 |= (1<<11); }
+void clr_z() { r.st0 &= ~(1<<11); }
+int get_m() { return r.st0 & (1<<10); }
+void set_m() { r.st0 |= (1<<10); }
+void clr_m() { r.st0 &= ~(1<<10); }
+int get_n() { return r.st0 & (1<<9); }
+void set_n() { r.st0 |= (1<<9); }
+void clr_n() { r.st0 &= ~(1<<9); }
+int get_v() { return r.st0 & (1<<8); }
+void set_v() { r.st0 |= (1<<8); }
+void clr_v() { r.st0 &= ~(1<<8); }
+int get_c() { return r.st0 & (1<<7); }
+void set_c() { r.st0 |= (1<<7); }
+void clr_c() { r.st0 &= ~(1<<7); }
+int get_e() { return r.st0 & (1<<6); }
+void set_e() { r.st0 |= (1<<6); }
+void clr_e() { r.st0 &= ~(1<<6); }
+int get_l() { return r.st0 & (1<<5); }
+void set_l() { r.st0 |= (1<<5); }
+void clr_l() { r.st0 &= ~(1<<5); }
 
 
 
+/* ram */
 u16 read16(u16 addr) { // data-bus
-    printf("read16(): %04x\n", addr);
+    printf("read16(): %04x\n", addr); // XXX: TODO
     return 0;
 }
 
@@ -171,12 +199,47 @@ u16 read_pram(u16 addr) {
     return ram[addr]; // XXX: TODO
 }
 
+/* emu */
+const char* cccc_str[] = { // conditions
+    "",    ".eq", ".ne", ".gt",
+    ".ge", ".lt", ".le", ".nn", // nn = normalize flag cleared
+    ".c",   ".v", ".e",   ".l",
+    ".nr",                      // r flag cleared (???)
+    ".niu0", ".iu0", ".iu1"     // 3 user-input conditions
+};
 
-void alm_op(int op, u16 addr, bool a01) {
-    // XXX: TODO
-    printf("alm_op()\n");
-}
+const char* moda_str[] = {
+    "shr",  "shr4", "shl", "shl4",
+    "ror",  "rol",  "clr", "RESERVED",
+    "not",  "neg",  "rnd", "pacr",
+    "clrr", "inc",  "dec", "copy"
+};
 
+const char* alm_str[] = {
+    "or",     "and",    "xor",  "add",
+    "tst0_a", "tst1_a", "cmp",  "sub",
+    "msu",    "addh",   "addl", "subh",
+    "subl",   "sqr",    "sqra", "cmpu"
+};
+
+const char* rrrrr_str[] = {
+    "r0",   "r1",
+    "r2",   "r3",
+    "r4",   "r5",
+    "rb",   "y" ,
+    "st0",  "st1",
+    "st2",  "p/ph",
+    "pc",   "sp"
+    "cfgi", "cfgj",
+    "b0h", "b1h",
+    "b0l", "b1l",
+    "ext0", "ext1",
+    "ext2", "ext3",
+    "a0", "a1",
+    "a0l", "a1l"
+    "a0h", "a1h"
+    "lc", "sv"
+};
 void rN_post_mod(int rN, int type) {
     int step=0; // XXX: TODO
 
@@ -184,7 +247,7 @@ void rN_post_mod(int rN, int type) {
     case 0: return;
     case 1: r.r[rN]++; return;
     case 2: r.r[rN]--; return;
-    case 3: r.r[rN]+=step; return;
+    case 3: printf("TODO: rN_post_mod step\n"); r.r[rN]+=step; return;
     }
 
     printf("Warning: Unknown rN mod.\n");
@@ -222,16 +285,96 @@ u64 get_reg_by_rrrrr(int rrrrr) {
 }
 
 bool check_cccc(int cccc) {
-    // XXX: TODO
+    switch(cccc) {
+    case  0: return true;
+    case  1: return  get_z();
+    case  2: return !get_z();
+    case  3: return !get_m() && !get_z();
+    case  4: return !get_m();
+    case  5: return  get_m();
+    case  6: return  get_m() || get_z();
+    case  7: return !get_n();
+    case  8: return  get_v();
+    case  9: return  get_c();
+    case 10: return  get_e();
+    case 11: return  get_l();
+    }
+
+    printf("TODO: nr, niu0, iu0, iu1 condition.\n");
     return true;
 }
 
-const char* cccc_str[] = {
-    "al", "eq", "ne", "gt",
-    "ge", "lt", "le", "nn",
-    "c", "v", "e", "l",
-    "nr", "niu0", "iu0", "iu1"
-};
+void set_ezmn_flags_on_aX(u64 aX) {
+    // Extension flag
+    u64 aXe = (aX & 0xF00000000ull) >> 32;
+    if((aXe == 0xF) || (aXe == 0)) clr_e(); else set_e();
+
+    // Zero flag
+    if(aX == 0) set_z(); else clr_z();
+
+    // Minus flag
+    if(aX & (1ull<<35)) set_m(); else clr_m();
+
+    // Normalized flag
+    if(get_z() || (!get_e() && (((aX>>31)&1) == ((aX>>30)&1)))) set_n(); else clr_n(); 
+}
+
+void alm_op(int op, u64 val, bool A) {
+    printf("alm_op(), op=%x\n", (unsigned int) op);
+
+    u64* aX = A ? (&r.a1) : (&r.a0);
+
+    switch(op) {
+    case 0:
+        printf("or\n");
+        return;
+    case 1:
+        printf("and\n");
+        return;
+    case 2:
+        printf("xor\n");
+        return;
+    case 3:
+        printf("add\n");
+        return;
+    case 4:
+        printf("tst0_a\n");
+        return;
+    case 5:
+        printf("tst1_a\n");
+        return;
+    case 6:
+        printf("cmp\n");
+        return;
+    case 7:
+        printf("sub\n");
+        return;
+    case 8:
+        printf("msu\n");
+        return;
+    case 9:
+        printf("addh\n");
+        return;
+    case 10:
+        printf("addl\n");
+        return;
+    case 11:
+        printf("subh\n");
+        return;
+    case 12:
+        printf("subl\n");
+        return;
+    case 13:
+        printf("sqr\n");
+        return;
+    case 14:
+        printf("sqra\n");
+        return;
+    case 15: // cmpu
+        set_ezmn_flags_on_aX(*aX - val); // TODO
+        return;
+    }
+}
 
 int run_dsp() {
     /*
@@ -254,27 +397,167 @@ int run_dsp() {
     int cccc = opc & 0xF;
     int ooooooo = (opc>>4) & 0x7F;
     int f = (opc>>4) & 1;
+    int vvvvvvvv = opc & 0xFF;
+    int ffff = (opc>>4) & 0xF;
+    int A_ = (opc>>12) & 1;
 
-    if((opc & 0xE000) == 0xA000) {
+
+    /*___ load page _________________________________________________________*/
+    if((opc & 0xFF00) == 0x0400) {
+        printf("load 0x%04x, st1.page\n", vvvvvvvv << 8);
+
+        // Set lower 8 bits of st1 register.
+        r.st1 &= ~0xFF;
+        r.st1 |= vvvvvvvv;
+        return 0;
+    }
+
+    /*___ alu+multiplier ____________________________________________________*/
+    if((opc & 0xE000) == 0xA000) { // ALM
         // Load address higher-bits from st1 status register.
         u16 addr = ((r.st1&0xFF) << 8) | dddddddd;
+
+        printf("%s a%d, [0x%04x]\n", alm_str[ALM_XXXX], A, addr);
 
         alm_op(ALM_XXXX, read16(addr), A);
         return 0;
     }
-    if((opc & 0xE0E0) == 0x8080) {
+
+    /*___ alu+multiplier ____________________________________________________*/
+    if((opc & 0xE0E0) == 0x8080) { // ALM
         if(nnn < 6) {
             alm_op(ALM_XXXX, read16(r.r[nnn]), A);
             rN_post_mod(nnn, mm);
             return 0;
         }
     }
-    if((opc & 0xE0E0) == 0x8090) {
+
+    /*___ alu+multiplier ____________________________________________________*/
+    if((opc & 0xE0E0) == 0x8090) { // ALM
         alm_op(ALM_XXXX, get_reg_by_rrrrr(rrrrr), A);
         return 0;
     }
-    if((opc & 0xFFC0) == 0x4180) { // branch absolute
-        printf("br.%s 0x%04x\n", cccc_str[cccc], read_pram(r.pc));
+
+    /*___ modify aX _________________________________________________________*/
+    if((opc & 0xEF00) == 0x6700) { // moda
+        printf("%s%s a%d %s\n", moda_str[ffff], cccc_str[cccc], A_, check_cccc(cccc) ? "" : "(skipped)");
+
+        if(!check_cccc(cccc))
+            return 0;
+
+        u64* aX = A_ ? (&r.a1) : (&r.a0);
+
+        switch(ffff) {
+        case 0: // shr
+            if(*aX & 1) set_c(); else clr_c(); // carry flag
+
+            if(ARITHMETIC_SHIFTMODE) {
+                if(*aX & (1ull<<35)) *aX = (1ull<<35) | (*aX>>1);
+                else                 *aX = *aX>>1;
+                // TODO: update L flag
+            }
+            else {
+                *aX = *aX>>1;
+            }
+
+            clr_v(); // overflow flag
+            set_ezmn_flags_on_aX(*aX);
+            break;
+
+        case 1: // shr4
+            if(*aX & (1<<3)) set_c(); else clr_c(); // carry flag
+
+            if(ARITHMETIC_SHIFTMODE) {
+                if(*aX & (1ull<<35)) *aX = (0xFull<<32) | (*aX>>4);
+                else                 *aX = *aX>>4;
+                // TODO: update L flag
+            }
+            else {
+                *aX = *aX>>4;
+            }
+
+            clr_v(); // overflow flag
+            set_ezmn_flags_on_aX(*aX);
+            break;
+
+        case 2: // shl
+            if(*aX & (1ull<<35)) set_c(); else clr_c(); // carry+overflow flag
+            // TODO: V flag
+            *aX = (*aX<<1) & 0xFFFFFFFFFull;
+            // TODO: update L flag on arithmetic mode
+            set_ezmn_flags_on_aX(*aX);
+            break;
+
+        case 3: // shl4
+            if(*aX & (1ull<<32)) set_c(); else clr_c(); // carry flag
+            // TODO: V flag
+            *aX = (*aX<<4) & 0xFFFFFFFFFull;
+            // TODO: update L flag on arithmetic mode
+            set_ezmn_flags_on_aX(*aX);
+            break;
+
+        case 4: // ror
+        case 5: // rol
+            printf("ror/rol: TODO!\n");
+            break;
+
+        case 6: // clr
+            *aX = 0;
+            set_ezmn_flags_on_aX(*aX);
+            break;
+
+        case 7: // reserved
+            printf("RESERVED!\n");
+            return 1;
+
+        case 8: // not
+            *aX = (~*aX) & 0xFFFFFFFFFull;
+            set_ezmn_flags_on_aX(*aX);
+            break;
+
+        case 9: // neg
+            *aX = ((~*aX) + 1) & 0xFFFFFFFFFull;
+            set_ezmn_flags_on_aX(*aX); // TODO: V,C,L flags
+            break;
+
+        case 10: // round
+            printf("round: TODO!\n");
+            break;
+
+        case 11: // pacr
+            printf("pacr: TODO!\n");
+            break;
+
+        case 12: // clrr
+            *aX = 0x8000;
+            set_ezmn_flags_on_aX(*aX);
+            break;
+
+        case 13: // inc
+            *aX = (*aX + 1) & 0xFFFFFFFFFull;
+            set_ezmn_flags_on_aX(*aX); // TODO: V,C,L flags
+            break;
+
+        case 14: // dec
+            if(*aX == 0)
+                *aX = 0xFFFFFFFFFull;
+            else
+                *aX = *aX - 1;
+            set_ezmn_flags_on_aX(*aX); // TODO: V,C,L flags
+            break;
+
+        case 15: // copy
+            *aX = *aX;
+            set_ezmn_flags_on_aX(*aX);
+            break;
+        }
+
+        return 0;
+    }
+
+    /*___ branch absolute ___________________________________________________*/
+    if((opc & 0xFFC0) == 0x4180) {
+        printf("br%s 0x%04x %s\n", cccc_str[cccc], read_pram(r.pc), check_cccc(cccc) ? "" : "(skipped)");
 
         if(check_cccc(cccc))
             r.pc = read_pram(r.pc);
@@ -282,8 +565,10 @@ int run_dsp() {
 
         return 0;
     }
-    if((opc & 0xF800) == 0x5000) { // branch relative
-        printf("brr.%s 0x%04x\n", cccc_str[cccc], r.pc+ooooooo);
+
+    /*___ branch relative ___________________________________________________*/
+    if((opc & 0xF800) == 0x5000) {
+        printf("brr%s 0x%04x %s\n", cccc_str[cccc], r.pc+ooooooo, check_cccc(cccc) ? "" : "(skipped)");
 
         // XXX: sign extension on ooooooo?
         if(check_cccc(cccc))
@@ -292,31 +577,43 @@ int run_dsp() {
 
         return 0;
     }
+
+    /*___ nop _______________________________________________________________*/
     if((opc & (~0x1F)) == 0) {
         printf("nop\n");
         return 0;
     }
-    if((opc & (~0x1F)) == 0x20) {
+
+    /*___ trap ______________________________________________________________*/
+    if(opc == 0x0020) {
         // XXX: TODO
         printf("trap\n");
         r.pc = 2;
         return 0;
     }
-    if((opc & 0xFFC0) == 0xD380) { // cntx
+
+    /*___ cntx ______________________________________________________________*/
+    if((opc & 0xFFC0) == 0xD380) {
         // XXX: TODO
         printf("cntx\n");
         return 0;
     }
+
+    /*___ enable interrupt __________________________________________________*/
     if((opc & 0xFFC0) == 0x4380) {
         // XXX: TODO
         printf("eint\n");
         return 0;
     }
+
+    /*___ disable interrupt _________________________________________________*/
     if((opc & 0xFFC0) == 0x43C0) {
         // XXX: TODO
         printf("dint\n");
         return 0;
     }
+
+    /*___ modify rN _________________________________________________________*/
     if((opc & 0xFF80) == 0x80) {
         // XXX: TODO
         printf("modr\n");
@@ -330,7 +627,18 @@ int run_dsp() {
 
         return 0;
     }
-    //0000 0000 1.fmmnnn
+
+    /*___ mov pp (unknown reg) ______________________________________________*/
+    if((opc & 0xFFF8) == 0x0030) { // mov_pplong_imm_MODSTT
+        u16 imm = read_pram(r.pc++);
+        int modstt = opc & 7;
+        printf("mov pp, 0x%04x, modstt=%x\n", imm & 0xFFFF, modstt);
+        r.pp = imm;
+        
+        // modstt: stt0, stt1, stt2, wrong_ModStt, mod0, mod1, mod2, mod3
+
+        return 0;
+    }
 
     printf("Unknown op: %04x\n", read_pram(r.pc-1));
     return 1;
