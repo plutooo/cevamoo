@@ -239,10 +239,17 @@ const char* rrrrr_str[] = {
     "a0h",  "a1h"
     "lc",   "sv"
 };
+
 const char* AB_str[] = {
     "b0", "b1",
     "a0", "a1"
 };
+
+const char* modstt_str[] = {
+    "stt0", "stt1", "stt2", "WRONG!",
+    "mod0", "mod1", "mod2", "mod3"
+};
+
 
 void rN_post_mod(int rN, int type) {
     int step=0; // XXX: TODO
@@ -389,8 +396,8 @@ int run_dsp() {
       (3) rN registers are 16-bit addresses directly into X/Y-mem. Zmem not supported. Note: Pmem can be read!!
       (4) rb register can contain any 16-bit data-addr. 
     */
-    printf("%04x: ", r.pc);
     u16 opc = read_pram(r.pc++);
+    printf("%04x | %02x %02x  | ", r.pc, opc & 0xFF, (opc>>8) & 0xFF);
 
     int A        = (opc&0x100) ? 1 : 0;
     int dddddddd =  opc & 0xFF;
@@ -405,6 +412,7 @@ int run_dsp() {
     int ffff     = (opc>>4) & 0xF;
     int A_       = (opc>>12) & 1;
     int AB       = (opc>>5) & 3;
+    int modstt = opc & 7;
 
 
     /*___ move shifted ______________________________________________________*/
@@ -430,7 +438,7 @@ int run_dsp() {
         }
         else if((sv < 0) && (sv >= -36)) {
             // XXX: Sign extension on rrrrr value!!
-            *ab = get_reg_by_rrrrr(rrrrr) >> sv;
+            *ab = get_reg_by_rrrrr(rrrrr) >> -sv;
             // XXX: flags
             return 0;
         }
@@ -442,15 +450,33 @@ int run_dsp() {
     /*___ move ______________________________________________________________*/
     if((opc & 0xFFE0) == 0x5E00) {
         u16 imm = read_pram(r.pc++);
-        printf("mov #0x%04x, %s\n", imm, rrrrr_str[rrrrr]);
+        printf("mov #0x%04x, %s\n", imm & 0xFFFF, rrrrr_str[rrrrr]);
         // XXX: TODO
+        return 0;
+    }
+
+    /*___ reset bitfield ____________________________________________________*/
+    if((opc & 0xFFF8) == 0x4388) {
+        u16 imm = read_pram(r.pc++);
+        printf("rst #0x%04x, %s\n", imm & 0xFFFF, modstt_str[modstt]);
+        // XXX: TODO
+        return 0;
+    }
+
+    /*___ call ______________________________________________________________*/
+    if((opc & 0xFFC0) == 0x41C0) {
+        u16 imm = read_pram(r.pc++);
+        printf("call%s 0x%04x\n", cccc_str[cccc], imm, check_cccc(cccc) ? "" : "(skipped)");
+        r.sp--;
+        write16(r.sp, pc);
+        r.pc = imm;
         return 0;
     }
 
     /*___ addv ______________________________________________________________*/
     if((opc & 0xFFE0) == 0x87E0) {
         u16 imm = read_pram(r.pc++);
-        printf("addv #0x%04x, %s\n", imm, rrrrr_str[rrrrr]);
+        printf("addv #0x%04x, %s\n", imm & 0xFFFF, rrrrr_str[rrrrr]);
         // XXX: TODO
         return 0;
     }
@@ -654,14 +680,14 @@ int run_dsp() {
     }
 
     /*___ enable interrupt __________________________________________________*/
-    if((opc & 0xFFC0) == 0x4380) {
+    if(opc == 0x4380) {
         // XXX: TODO
         printf("eint\n");
         return 0;
     }
 
     /*___ disable interrupt _________________________________________________*/
-    if((opc & 0xFFC0) == 0x43C0) {
+    if(opc == 0x43C0) {
         // XXX: TODO
         printf("dint\n");
         return 0;
@@ -685,13 +711,6 @@ int run_dsp() {
     /*___ mov pp (unknown reg) ______________________________________________*/
     if((opc & 0xFFF8) == 0x0030) {
         u16 imm = read_pram(r.pc++);
-        int modstt = opc & 7;
-
-        const char* modstt_str[] = {
-            "stt0", "stt1", "stt2", "WRONG!",
-            "mod0", "mod1", "mod2", "mod3"
-        };
-
         // TODO
         printf("mov #0x%04x, %s\n", imm & 0xFFFF, modstt_str[modstt]);
         return 0;
