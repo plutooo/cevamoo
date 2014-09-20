@@ -5,6 +5,7 @@
 
 typedef unsigned char u8;
 typedef unsigned short u16;
+typedef   signed short s16;
 typedef unsigned int u32;
 typedef unsigned long long int u64;
 
@@ -46,7 +47,7 @@ struct {
     // Notation: a0l is bit0-15. a0h is bit16-31. a0e is bit32-35.
     u64 a0, a1, b0, b1;
 
-    u16 sv;
+    s16 sv; // shift register
 
     // cfgi: bit15-31: modi, bit0-15: stepi
     u16 cfgi, cfgj;
@@ -125,8 +126,6 @@ struct {
     u16 dvm; // HW breakpoint for data accesses. Debug register. Also used for TRAP/BI routine.
     u16 ext[4]; // External registers..
 
-    u16 pp; // is this same as p reg?
-
 } r; // registers
 
 #define ARITHMETIC_SHIFTMODE (r.st2 & (1<<7))
@@ -188,7 +187,7 @@ void clr_l() { r.st0 &= ~(1<<5); }
 /* ram */
 u16 read16(u16 addr) { // data-bus
     printf("read16(): %04x\n", addr); // XXX: TODO
-    return 0;
+    return 0x0;
 }
 
 void write16(u16 addr, u16 val) { // data-bus
@@ -229,17 +228,22 @@ const char* rrrrr_str[] = {
     "rb",   "y" ,
     "st0",  "st1",
     "st2",  "p/ph",
-    "pc",   "sp"
+    "pc",   "sp",
     "cfgi", "cfgj",
-    "b0h", "b1h",
-    "b0l", "b1l",
+    "b0h",  "b1h",
+    "b0l",  "b1l",
     "ext0", "ext1",
     "ext2", "ext3",
-    "a0", "a1",
-    "a0l", "a1l"
-    "a0h", "a1h"
-    "lc", "sv"
+    "a0",   "a1",
+    "a0l",  "a1l"
+    "a0h",  "a1h"
+    "lc",   "sv"
 };
+const char* AB_str[] = {
+    "b0", "b1",
+    "a0", "a1"
+};
+
 void rN_post_mod(int rN, int type) {
     int step=0; // XXX: TODO
 
@@ -388,23 +392,73 @@ int run_dsp() {
     printf("%04x: ", r.pc);
     u16 opc = read_pram(r.pc++);
 
-    int A = (opc&0x100) ? 1 : 0;
-    int dddddddd = opc & 0xFF;
+    int A        = (opc&0x100) ? 1 : 0;
+    int dddddddd =  opc & 0xFF;
     int ALM_XXXX = (opc>>9) & 0xF;
-    int nnn = opc & 0x7;
-    int mm = (opc>>3) & 3;
-    int rrrrr = opc & 0x1F;
-    int cccc = opc & 0xF;
-    int ooooooo = (opc>>4) & 0x7F;
-    int f = (opc>>4) & 1;
-    int vvvvvvvv = opc & 0xFF;
-    int ffff = (opc>>4) & 0xF;
-    int A_ = (opc>>12) & 1;
+    int nnn      =  opc & 0x7;
+    int mm       = (opc>>3) & 3;
+    int rrrrr    =  opc & 0x1F;
+    int cccc     =  opc & 0xF;
+    int ooooooo  = (opc>>4) & 0x7F;
+    int f        = (opc>>4) & 1;
+    int vvvvvvvv =  opc & 0xFF;
+    int ffff     = (opc>>4) & 0xF;
+    int A_       = (opc>>12) & 1;
+    int AB       = (opc>>5) & 3;
+
+
+    /*___ move shifted ______________________________________________________*/
+    if((opc & 0xFF80) == 0x0100) { 
+        printf("movs %s, %s\n", rrrrr_str[rrrrr], AB_str[AB]);
+
+        u64* ab;
+
+        switch(AB) {
+        case 0: ab = &r.b0; break;
+        case 1: ab = &r.b1; break;
+        case 2: ab = &r.a0; break;
+        case 3: ab = &r.a1; break;
+        }
+
+        s16 sv = r.sv; // sign value
+
+        if((sv >= 0) && (sv <= 36)) {
+            // XXX: Sign extension on rrrrr value!!
+            *ab = get_reg_by_rrrrr(rrrrr) << sv;
+            // XXX: flags
+            return 0;
+        }
+        else if((sv < 0) && (sv >= -36)) {
+            // XXX: Sign extension on rrrrr value!!
+            *ab = get_reg_by_rrrrr(rrrrr) >> sv;
+            // XXX: flags
+            return 0;
+        }
+
+        printf("mov shifted: weird sv value.\n");
+        return 1;
+    }
+
+    /*___ move ______________________________________________________________*/
+    if((opc & 0xFFE0) == 0x5E00) {
+        u16 imm = read_pram(r.pc++);
+        printf("mov #0x%04x, %s\n", imm, rrrrr_str[rrrrr]);
+        // XXX: TODO
+        return 0;
+    }
+
+    /*___ addv ______________________________________________________________*/
+    if((opc & 0xFFE0) == 0x87E0) {
+        u16 imm = read_pram(r.pc++);
+        printf("addv #0x%04x, %s\n", imm, rrrrr_str[rrrrr]);
+        // XXX: TODO
+        return 0;
+    }
 
 
     /*___ load page _________________________________________________________*/
     if((opc & 0xFF00) == 0x0400) {
-        printf("load 0x%04x, st1.page\n", vvvvvvvv << 8);
+        printf("load #0x%04x, st1.page\n", vvvvvvvv << 8);
 
         // Set lower 8 bits of st1 register.
         r.st1 &= ~0xFF;
@@ -629,14 +683,17 @@ int run_dsp() {
     }
 
     /*___ mov pp (unknown reg) ______________________________________________*/
-    if((opc & 0xFFF8) == 0x0030) { // mov_pplong_imm_MODSTT
+    if((opc & 0xFFF8) == 0x0030) {
         u16 imm = read_pram(r.pc++);
         int modstt = opc & 7;
-        printf("mov pp, 0x%04x, modstt=%x\n", imm & 0xFFFF, modstt);
-        r.pp = imm;
-        
-        // modstt: stt0, stt1, stt2, wrong_ModStt, mod0, mod1, mod2, mod3
 
+        const char* modstt_str[] = {
+            "stt0", "stt1", "stt2", "WRONG!",
+            "mod0", "mod1", "mod2", "mod3"
+        };
+
+        // TODO
+        printf("mov #0x%04x, %s\n", imm & 0xFFFF, modstt_str[modstt]);
         return 0;
     }
 
