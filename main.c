@@ -160,25 +160,25 @@ u32 prog_mappings[8];
 
 
 /* cpu status */
-int get_z() { return r.st0 & (1<<11); }
+int  get_z() { return r.st0 & (1<<11); }
 void set_z() { r.st0 |= (1<<11); }
 void clr_z() { r.st0 &= ~(1<<11); }
-int get_m() { return r.st0 & (1<<10); }
+int  get_m() { return r.st0 & (1<<10); }
 void set_m() { r.st0 |= (1<<10); }
 void clr_m() { r.st0 &= ~(1<<10); }
-int get_n() { return r.st0 & (1<<9); }
+int  get_n() { return r.st0 & (1<<9); }
 void set_n() { r.st0 |= (1<<9); }
 void clr_n() { r.st0 &= ~(1<<9); }
-int get_v() { return r.st0 & (1<<8); }
+int  get_v() { return r.st0 & (1<<8); }
 void set_v() { r.st0 |= (1<<8); }
 void clr_v() { r.st0 &= ~(1<<8); }
-int get_c() { return r.st0 & (1<<7); }
+int  get_c() { return r.st0 & (1<<7); }
 void set_c() { r.st0 |= (1<<7); }
 void clr_c() { r.st0 &= ~(1<<7); }
-int get_e() { return r.st0 & (1<<6); }
+int  get_e() { return r.st0 & (1<<6); }
 void set_e() { r.st0 |= (1<<6); }
 void clr_e() { r.st0 &= ~(1<<6); }
-int get_l() { return r.st0 & (1<<5); }
+int  get_l() { return r.st0 & (1<<5); }
 void set_l() { r.st0 |= (1<<5); }
 void clr_l() { r.st0 &= ~(1<<5); }
 
@@ -250,7 +250,20 @@ const char* modstt_str[] = {
     "mod0", "mod1", "mod2", "mod3"
 };
 
+#define BIT(x, n) \
+    (((x)>>(n))&1)
 
+
+
+// Sign extend from s16 to s36.
+u64 se_1636(u16 in) {
+    if(BIT(in, 15))
+        return 0xFFFFF0000ull | in;
+
+    return in;
+}
+
+// Apply rN post modification (0, +1, -1, +step).
 void rN_post_mod(int rN, int type) {
     int step=0; // XXX: TODO
 
@@ -264,14 +277,14 @@ void rN_post_mod(int rN, int type) {
     printf("Warning: Unknown rN mod.\n");
 }
 
-u64 get_reg_by_rrrrr(int rrrrr) {
+u64 get_rrrrr_reg(int rrrrr) {
     switch(rrrrr) {
     case 0: case 1: case 2: case 3: case 4: case 5:
         return r.r[rrrrr];
-    case 6: return r.rb;
-    case 7: return r.y;
-    case 8: return r.st0;
-    case 9: return r.st1;
+    case 6:  return r.rb;
+    case 7:  return r.y;
+    case 8:  return r.st0;
+    case 9:  return r.st1;
     case 10: return r.st2;
     case 11: return r.p; // p/ph?
     case 12: return r.pc;
@@ -295,6 +308,95 @@ u64 get_reg_by_rrrrr(int rrrrr) {
     }
 }
 
+// Sign extension on 16-bit regs, nothing on 36-bit regs.
+u64 get_rrrrr_reg_se(int rrrrr) {
+    switch(rrrrr) {
+    case 0: case 1: case 2: case 3: case 4: case 5:
+        return se_1636(r.r[rrrrr]);
+    case 6:  return se_1636(r.rb);
+    case 7:  return se_1636(r.y);
+    case 8:  return se_1636(r.st0);
+    case 9:  return se_1636(r.st1);
+    case 10: return se_1636(r.st2);
+    case 11: return r.p; // XXX: Sign extend s32 -> s36?
+    case 12: return se_1636(r.pc);
+    case 13: return se_1636(r.sp);
+    case 14: return se_1636(r.cfgi);
+    case 15: return se_1636(r.cfgj);
+    case 16: return se_1636((r.b0 >> 16) & 0xFFFF);
+    case 17: return se_1636((r.b1 >> 16) & 0xFFFF);
+    case 18: return se_1636(r.b0 & 0xFFFF);
+    case 19: return se_1636(r.b1 & 0xFFFF);
+    case 20: case 21: case 22: case 23:
+        return se_1636(r.ext[rrrrr-20]);
+    case 24: return r.a0;
+    case 25: return r.a1;
+    case 26: return se_1636(r.a0 & 0xFFFF);
+    case 27: return se_1636(r.a1 & 0xFFFF);
+    case 28: return se_1636((r.a0>>16) & 0xFFFF);
+    case 29: return se_1636((r.a1>>16) & 0xFFFF);
+    case 30: return se_1636(r.lc);
+    case 31: return se_1636(r.sv);
+    }
+}
+
+void set_rrrrr_reg(int rrrrr, u64 val) {
+    switch(rrrrr) {
+    case 0: case 1: case 2: case 3: case 4: case 5:
+        r.r[rrrrr] = val;
+        break;
+    case 6: r.rb = val;    break;
+    case 7: r.y = val;     break;
+    case 8: r.st0 = val;   break;
+    case 9: r.st1 = val;   break;
+    case 10: r.st2 = val;  break;
+    case 11: r.p = val;    break; // p/ph?
+    case 12: r.pc = val;   break;
+    case 13: r.sp = val;   break;
+    case 14: r.cfgi = val; break;
+    case 15: r.cfgj = val; break;
+    case 16:
+        r.b0 &= ~0xFFFF0000ull;
+        r.b0 |= (val & 0xFFFF) << 16;
+        break;
+    case 17:
+        r.b1 &= ~0xFFFF0000ull;
+        r.b1 |= (val & 0xFFFF) << 16;
+        break;
+    case 18:
+        r.b0 &= ~0xFFFFull;
+        r.b0 |= val & 0xFFFF;
+        break;
+    case 19:
+        r.b1 &= ~0xFFFFull;
+        r.b1 |= val & 0xFFFF;
+        break;
+    case 20: case 21: case 22: case 23:
+        r.ext[rrrrr-20] = val;
+        break;
+    case 24: r.a0 = val & 0xFFFFFFFFFull; break;
+    case 25: r.a1 = val & 0xFFFFFFFFFull; break;
+    case 26:
+        r.a0 = (val & 0xFFFF) | (r.a0 & 0xF00000000ull);
+        // Maybe: r.a0 = (val & 0xFFFF)
+        break;
+    case 27:
+        r.a1 = (val & 0xFFFF) | (r.a1 & 0xF00000000ull);
+        // Maybe: r.a1 = (val & 0xFFFF)
+        break;
+    case 28:
+        r.a0 = ((val & 0xFFFF) << 16) | (r.a0 & 0xF00000000ull);
+        // Maybe: r.a0 = (val & 0xFFFF) << 16
+        break;
+    case 29:
+        r.a1 = ((val & 0xFFFF) << 16) | (r.a1 & 0xF00000000ull);
+        // Maybe: r.a0 = (val & 0xFFFF) << 16
+        break;
+    case 30: r.lc = val; break;
+    case 31: r.sv = val; break;
+    }
+}
+
 bool check_cccc(int cccc) {
     switch(cccc) {
     case  0: return true;
@@ -315,7 +417,7 @@ bool check_cccc(int cccc) {
     return true;
 }
 
-void set_ezmn_flags_on_aX(u64 aX) {
+void set_ezm_flags_on_aX(u64 aX) {
     // Extension flag
     u64 aXe = (aX & 0xF00000000ull) >> 32;
     if((aXe == 0xF) || (aXe == 0)) clr_e(); else set_e();
@@ -325,28 +427,36 @@ void set_ezmn_flags_on_aX(u64 aX) {
 
     // Minus flag
     if(aX & (1ull<<35)) set_m(); else clr_m();
+}
+
+void set_ezmn_flags_on_aX(u64 aX) {
+    set_ezm_flags_on_aX(aX);
 
     // Normalized flag
     if(get_z() || (!get_e() && (((aX>>31)&1) == ((aX>>30)&1)))) set_n(); else clr_n(); 
 }
 
-void alm_op(int op, u64 val, bool A) {
+void alm_op(int op, u64 val, u64 val_se, bool A) {
     printf("alm_op(), op=%x\n", (unsigned int) op);
 
     u64* aX = A ? (&r.a1) : (&r.a0);
 
     switch(op) {
-    case 0:
-        printf("or\n");
+    case 0: // or
+        *aX |= val;
+        set_ezmn_flags_on_aX(*aX);
         return;
-    case 1:
-        printf("and\n");
+    case 1: // and
+        *aX |= val;
+        set_ezm_flags_on_aX(*aX);
         return;
     case 2:
-        printf("xor\n");
+        *aX ^= val;
+        set_ezmn_flags_on_aX(*aX);
         return;
     case 3:
-        printf("add\n");
+        *aX = (*aX + val_se) & 0xFFFFFFFFFull; // XXX: V,C,L flags
+        set_ezmn_flags_on_aX(*aX);
         return;
     case 4:
         printf("tst0_a\n");
@@ -364,16 +474,24 @@ void alm_op(int op, u64 val, bool A) {
         printf("msu\n");
         return;
     case 9:
-        printf("addh\n");
+        // XXX: fix this
+        *aX = (*aX + ((val & 0xFFFF) << 16)) & 0xFFFFFFFFFull; // XXX: V,C,L flags
+        set_ezmn_flags_on_aX(*aX);
         return;
     case 10:
-        printf("addl\n");
+        // XXX: fix this
+        *aX = (*aX + (val & 0xFFFF)) & 0xFFFFFFFFFull; // XXX: V,C,L flags
+        set_ezmn_flags_on_aX(*aX);
         return;
     case 11:
-        printf("subh\n");
+        // XXX: fix this
+        *aX = (*aX - ((val & 0xFFFF) << 16)) & 0xFFFFFFFFFull; // XXX: V,C,L flags
+        set_ezmn_flags_on_aX(*aX);
         return;
     case 12:
-        printf("subl\n");
+        // XXX: fix this
+        *aX = (*aX - (val & 0xFFFF)) & 0xFFFFFFFFFull; // XXX: V,C,L flags
+        set_ezmn_flags_on_aX(*aX);
         return;
     case 13:
         printf("sqr\n");
@@ -382,7 +500,8 @@ void alm_op(int op, u64 val, bool A) {
         printf("sqra\n");
         return;
     case 15: // cmpu
-        set_ezmn_flags_on_aX(*aX - val); // TODO
+        // XXX: fix this
+        set_ezmn_flags_on_aX(*aX - val);
         return;
     }
 }
@@ -397,7 +516,7 @@ int run_dsp() {
       (4) rb register can contain any 16-bit data-addr. 
     */
     u16 opc = read_pram(r.pc++);
-    printf("%04x | %02x %02x  | ", r.pc, opc & 0xFF, (opc>>8) & 0xFF);
+    printf("%04x | %02x %02x  |  ", r.pc-1, opc & 0xFF, (opc>>8) & 0xFF);
 
     int A        = (opc&0x100) ? 1 : 0;
     int dddddddd =  opc & 0xFF;
@@ -412,7 +531,7 @@ int run_dsp() {
     int ffff     = (opc>>4) & 0xF;
     int A_       = (opc>>12) & 1;
     int AB       = (opc>>5) & 3;
-    int modstt = opc & 7;
+    int modstt   = opc & 7;
 
 
     /*___ move shifted ______________________________________________________*/
@@ -432,13 +551,13 @@ int run_dsp() {
 
         if((sv >= 0) && (sv <= 36)) {
             // XXX: Sign extension on rrrrr value!!
-            *ab = get_reg_by_rrrrr(rrrrr) << sv;
+            *ab = get_rrrrr_reg(rrrrr) << sv;
             // XXX: flags
             return 0;
         }
         else if((sv < 0) && (sv >= -36)) {
             // XXX: Sign extension on rrrrr value!!
-            *ab = get_reg_by_rrrrr(rrrrr) >> -sv;
+            *ab = get_rrrrr_reg(rrrrr) >> -sv;
             // XXX: flags
             return 0;
         }
@@ -450,7 +569,7 @@ int run_dsp() {
     /*___ move ______________________________________________________________*/
     if((opc & 0xFFE0) == 0x5E00) {
         u16 imm = read_pram(r.pc++);
-        printf("mov #0x%04x, %s\n", imm & 0xFFFF, rrrrr_str[rrrrr]);
+        printf("mov #0x%04x, %s (todo)\n", imm & 0xFFFF, rrrrr_str[rrrrr]);
         // XXX: TODO
         return 0;
     }
@@ -458,7 +577,7 @@ int run_dsp() {
     /*___ reset bitfield ____________________________________________________*/
     if((opc & 0xFFF8) == 0x4388) {
         u16 imm = read_pram(r.pc++);
-        printf("rst #0x%04x, %s\n", imm & 0xFFFF, modstt_str[modstt]);
+        printf("rst #0x%04x, %s (todo)\n", imm & 0xFFFF, modstt_str[modstt]);
         // XXX: TODO
         return 0;
     }
@@ -476,11 +595,10 @@ int run_dsp() {
     /*___ addv ______________________________________________________________*/
     if((opc & 0xFFE0) == 0x87E0) {
         u16 imm = read_pram(r.pc++);
-        printf("addv #0x%04x, %s\n", imm & 0xFFFF, rrrrr_str[rrrrr]);
+        printf("addv #0x%04x, %s (todo)\n", imm & 0xFFFF, rrrrr_str[rrrrr]);
         // XXX: TODO
         return 0;
     }
-
 
     /*___ load page _________________________________________________________*/
     if((opc & 0xFF00) == 0x0400) {
@@ -496,17 +614,16 @@ int run_dsp() {
     if((opc & 0xE000) == 0xA000) { // ALM
         // Load address higher-bits from st1 status register.
         u16 addr = ((r.st1&0xFF) << 8) | dddddddd;
-
         printf("%s a%d, [0x%04x]\n", alm_str[ALM_XXXX], A, addr);
 
-        alm_op(ALM_XXXX, read16(addr), A);
+        alm_op(ALM_XXXX, read16(addr), se_1636(read16(addr)), A);
         return 0;
     }
 
     /*___ alu+multiplier ____________________________________________________*/
     if((opc & 0xE0E0) == 0x8080) { // ALM
         if(nnn < 6) {
-            alm_op(ALM_XXXX, read16(r.r[nnn]), A);
+            alm_op(ALM_XXXX, read16(r.r[nnn]), se_1636(read16(r.r[nnn])), A);
             rN_post_mod(nnn, mm);
             return 0;
         }
@@ -514,7 +631,7 @@ int run_dsp() {
 
     /*___ alu+multiplier ____________________________________________________*/
     if((opc & 0xE0E0) == 0x8090) { // ALM
-        alm_op(ALM_XXXX, get_reg_by_rrrrr(rrrrr), A);
+        alm_op(ALM_XXXX, get_rrrrr_reg(rrrrr), get_rrrrr_reg_se(rrrrr), A);
         return 0;
     }
 
@@ -529,56 +646,66 @@ int run_dsp() {
 
         switch(ffff) {
         case 0: // shr
-            if(*aX & 1) set_c(); else clr_c(); // carry flag
+            if(BIT(*aX, 0)) set_c(); else clr_c(); // carry flag
 
             if(ARITHMETIC_SHIFTMODE) {
-                if(*aX & (1ull<<35)) *aX = (1ull<<35) | (*aX>>1);
-                else                 *aX = *aX>>1;
-                // TODO: update L flag
+                if(BIT(*aX, 35)) *aX = (1ull<<35) | (*aX>>1);
+                else *aX = *aX>>1;
+
+                clr_v(); // overflow flag
             }
             else {
                 *aX = *aX>>1;
             }
 
-            clr_v(); // overflow flag
             set_ezmn_flags_on_aX(*aX);
             break;
 
         case 1: // shr4
-            if(*aX & (1<<3)) set_c(); else clr_c(); // carry flag
+            if(BIT(*aX, 3)) set_c(); else clr_c(); // carry flag
 
             if(ARITHMETIC_SHIFTMODE) {
-                if(*aX & (1ull<<35)) *aX = (0xFull<<32) | (*aX>>4);
-                else                 *aX = *aX>>4;
-                // TODO: update L flag
+                if(BIT(*aX, 35)) *aX = (0xFull<<32) | (*aX>>4);
+                else *aX = *aX>>4;
+
+                clr_v(); // overflow flag
             }
             else {
                 *aX = *aX>>4;
             }
 
-            clr_v(); // overflow flag
             set_ezmn_flags_on_aX(*aX);
             break;
 
         case 2: // shl
-            if(*aX & (1ull<<35)) set_c(); else clr_c(); // carry+overflow flag
-            // TODO: V flag
+            if(BIT(*aX, 35)) { set_c(); if(ARITHMETIC_SHIFTMODE) set_l(); } else clr_c(); // carry flag
+            if(BIT(*aX, 35) != BIT(*aX, 34)) set_v(); else clr_v(); // overflow flag
+
             *aX = (*aX<<1) & 0xFFFFFFFFFull;
-            // TODO: update L flag on arithmetic mode
             set_ezmn_flags_on_aX(*aX);
             break;
 
         case 3: // shl4
-            if(*aX & (1ull<<32)) set_c(); else clr_c(); // carry flag
-            // TODO: V flag
+            if(BIT(*aX, 32)) set_c(); else clr_c(); // carry flag
+            if(BIT(*aX, 32) != BIT(*aX, 31)) set_v(); else clr_v(); // overflow flag (???)
+            if(ARITHMETIC_SHIFTMODE && (*aX & 0xF00000000ull)) set_l();
+
             *aX = (*aX<<4) & 0xFFFFFFFFFull;
-            // TODO: update L flag on arithmetic mode
             set_ezmn_flags_on_aX(*aX);
             break;
 
         case 4: // ror
+            if(BIT(*aX, 0)) set_c(); else clr_c();
+
+            *aX = (*aX>>1) | (BIT(*aX, 0)<<35);
+            set_ezmn_flags_on_aX(*aX);
+            break;
+
         case 5: // rol
-            printf("ror/rol: TODO!\n");
+            if(BIT(*aX, 35)) set_c(); else clr_c();
+
+            *aX = (*aX<<1) | BIT(*aX, 35);
+            set_ezmn_flags_on_aX(*aX);
             break;
 
         case 6: // clr
@@ -681,14 +808,14 @@ int run_dsp() {
 
     /*___ enable interrupt __________________________________________________*/
     if(opc == 0x4380) {
-        // XXX: TODO
+        r.st0 |= 2;
         printf("eint\n");
         return 0;
     }
 
     /*___ disable interrupt _________________________________________________*/
     if(opc == 0x43C0) {
-        // XXX: TODO
+        r.st0 &= ~2;
         printf("dint\n");
         return 0;
     }
@@ -711,7 +838,7 @@ int run_dsp() {
     /*___ mov pp (unknown reg) ______________________________________________*/
     if((opc & 0xFFF8) == 0x0030) {
         u16 imm = read_pram(r.pc++);
-        // TODO
+        // XXX: TODO
         printf("mov #0x%04x, %s\n", imm & 0xFFFF, modstt_str[modstt]);
         return 0;
     }
