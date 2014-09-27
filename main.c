@@ -55,14 +55,18 @@ struct {
     u16 r[6];
 
     u16 sp; // stack ptr
-    u16 rb; // base ptr (segmentation?)
+    u16 fp; // frame ptr?
+
+    u16 rb; // base ptr (segmentation?), sometimes called r7?
 
     u16 mixp; // wut?
 
     // "banked" r-registers
     u16 r0b, r1b, r4b;
 
-    u16 pc;
+    u32 pc; // 20 bits
+    u8  prpage; // program ram page? 4 bits
+
     u16 lc; // link?
 
     u16 repc; // repeat counter? read-only!
@@ -219,6 +223,11 @@ const char* alm_str[] = {
     "tst0_a", "tst1_a", "cmp",  "sub",
     "msu",    "addh",   "addl", "subh",
     "subl",   "sqr",    "sqra", "cmpu"
+};
+
+const char* alu_str[] = {
+    "or", "and", "xor", "add",
+    "RESERVED", "RESERVED", "cmp", "sub"
 };
 
 const char* rrrrr_str[] = {
@@ -433,13 +442,13 @@ void set_ezmn_flags_on_aX(u64 aX) {
     set_ezm_flags_on_aX(aX);
 
     // Normalized flag
-    if(get_z() || (!get_e() && (((aX>>31)&1) == ((aX>>30)&1)))) set_n(); else clr_n(); 
+    if(get_z() || (!get_e() && (((aX>>31)&1) == ((aX>>30)&1)))) set_n();
+    else clr_n();
 }
 
 void alm_op(int op, u64 val, u64 val_se, bool A) {
-    printf("alm_op(), op=%x\n", (unsigned int) op);
-
     u64* aX = A ? (&r.a1) : (&r.a0);
+    printf("alm_op(), op=%x\n", (unsigned int) op);
 
     switch(op) {
     case 0: // or
@@ -506,6 +515,28 @@ void alm_op(int op, u64 val, u64 val_se, bool A) {
     }
 }
 
+void alu_op(int op, u16 val, bool A) {
+    u64* aX = A ? (&r.a1) : (&r.a0);
+    printf("alm_op(), op=%x\n", (unsigned int) op);
+
+    switch(op) {
+    case 0: // or
+        return;
+    case 1: // and
+        return;
+    case 2: // xor
+        return;
+    case 3: // add
+        return;
+    case 6: // cmp
+        return;
+    case 7: // sub
+        return;
+    }
+
+    printf("DSP WARNING: undefined ALU op\n");
+}
+
 int run_dsp() {
     /*
       Different instruction addressing modes:
@@ -520,12 +551,14 @@ int run_dsp() {
 
     int A        = (opc&0x100) ? 1 : 0;
     int dddddddd =  opc & 0xFF;
-    int ALM_XXXX = (opc>>9) & 0xF;
+    int XXXX     = (opc>>9) & 0xF;
+    int XXX      = (opc>>9) & 0x7;
     int nnn      =  opc & 0x7;
     int mm       = (opc>>3) & 3;
     int rrrrr    =  opc & 0x1F;
     int cccc     =  opc & 0xF;
     int ooooooo  = (opc>>4) & 0x7F;
+    int ooooooo_ =  opc & 0x7F;
     int f        = (opc>>4) & 1;
     int vvvvvvvv =  opc & 0xFF;
     int ffff     = (opc>>4) & 0xF;
@@ -534,104 +567,61 @@ int run_dsp() {
     int modstt   = opc & 7;
 
 
-    /*___ move shifted ______________________________________________________*/
-    if((opc & 0xFF80) == 0x0100) { 
-        printf("movs %s, %s\n", rrrrr_str[rrrrr], AB_str[AB]);
-
-        u64* ab;
-
-        switch(AB) {
-        case 0: ab = &r.b0; break;
-        case 1: ab = &r.b1; break;
-        case 2: ab = &r.a0; break;
-        case 3: ab = &r.a1; break;
-        }
-
-        s16 sv = r.sv; // sign value
-
-        if((sv >= 0) && (sv <= 36)) {
-            // XXX: Sign extension on rrrrr value!!
-            *ab = get_rrrrr_reg(rrrrr) << sv;
-            // XXX: flags
-            return 0;
-        }
-        else if((sv < 0) && (sv >= -36)) {
-            // XXX: Sign extension on rrrrr value!!
-            *ab = get_rrrrr_reg(rrrrr) >> -sv;
-            // XXX: flags
-            return 0;
-        }
-
-        printf("mov shifted: weird sv value.\n");
-        return 1;
-    }
-
-    /*___ move ______________________________________________________________*/
-    if((opc & 0xFFE0) == 0x5E00) {
-        u16 imm = read_pram(r.pc++);
-        printf("mov #0x%04x, %s (todo)\n", imm & 0xFFFF, rrrrr_str[rrrrr]);
-        // XXX: TODO
-        return 0;
-    }
-
-    /*___ reset bitfield ____________________________________________________*/
-    if((opc & 0xFFF8) == 0x4388) {
-        u16 imm = read_pram(r.pc++);
-        printf("rst #0x%04x, %s (todo)\n", imm & 0xFFFF, modstt_str[modstt]);
-        // XXX: TODO
-        return 0;
-    }
-
-    /*___ call ______________________________________________________________*/
-    if((opc & 0xFFC0) == 0x41C0) {
-        u16 imm = read_pram(r.pc++);
-        printf("call%s 0x%04x\n", cccc_str[cccc], imm, check_cccc(cccc) ? "" : "(skipped)");
-        r.sp--;
-        write16(r.sp, pc);
-        r.pc = imm;
-        return 0;
-    }
-
-    /*___ addv ______________________________________________________________*/
-    if((opc & 0xFFE0) == 0x87E0) {
-        u16 imm = read_pram(r.pc++);
-        printf("addv #0x%04x, %s (todo)\n", imm & 0xFFFF, rrrrr_str[rrrrr]);
-        // XXX: TODO
-        return 0;
-    }
-
-    /*___ load page _________________________________________________________*/
-    if((opc & 0xFF00) == 0x0400) {
-        printf("load #0x%04x, st1.page\n", vvvvvvvv << 8);
-
-        // Set lower 8 bits of st1 register.
-        r.st1 &= ~0xFF;
-        r.st1 |= vvvvvvvv;
-        return 0;
-    }
-
     /*___ alu+multiplier ____________________________________________________*/
-    if((opc & 0xE000) == 0xA000) { // ALM
+    if((opc & 0xE000) == 0xA000) { // ALM direct
         // Load address higher-bits from st1 status register.
         u16 addr = ((r.st1&0xFF) << 8) | dddddddd;
-        printf("%s a%d, [0x%04x]\n", alm_str[ALM_XXXX], A, addr);
+        printf("%s [0x%04x], a%d\n", alm_str[XXXX], addr, A);
 
-        alm_op(ALM_XXXX, read16(addr), se_1636(read16(addr)), A);
+        alm_op(XXXX, read16(addr), se_1636(read16(addr)), A);
         return 0;
     }
-
-    /*___ alu+multiplier ____________________________________________________*/
-    if((opc & 0xE0E0) == 0x8080) { // ALM
+    if((opc & 0xE0E0) == 0x8080) { // ALM (rN)
         if(nnn < 6) {
-            alm_op(ALM_XXXX, read16(r.r[nnn]), se_1636(read16(r.r[nnn])), A);
+            u16 deref = read16(r.r[nnn]);
+            printf("%s (r%d), a%d      ;; (r%d) = (0x%04x) = 0x%04x\n",
+                alm_str[XXXX], nnn, A, nnn, r.r[nnn] & 0xFFFF, deref & 0xFFFF);
+
+            alm_op(XXXX, deref, se_1636(deref), A);
             rN_post_mod(nnn, mm);
             return 0;
         }
     }
+    if((opc & 0xE0E0) == 0x8090) { // ALM register
+        printf("%s r%d, a%d            ;; r%d = 0x%02x\n", alm_str[XXXX], nnn, rrrrr_str[rrrrr], nnn, r.r[nnn] & 0xFFFF);
+        alm_op(XXXX, get_rrrrr_reg(rrrrr), get_rrrrr_reg_se(rrrrr), A);
+        return 0;
+    }
 
-    /*___ alu+multiplier ____________________________________________________*/
-    if((opc & 0xE0E0) == 0x8090) { // ALM
-        alm_op(ALM_XXXX, get_rrrrr_reg(rrrrr), get_rrrrr_reg_se(rrrrr), A);
+    /*___ alu _______________________________________________________________*/
+    if((opc & 0xF000) == 0xC000) { // ALU #short imm
+        printf("%s #0x%02x, a%d\n", alu_str[XXX], vvvvvvvv, A);
+        alu_op(XXX, vvvvvvvv, A);
+        return 0;
+    }
+    if((opc & 0xF0E0) == 0x80C0) { // ALU ##long imm
+        if(opc & 0xF) {
+            printf("DSP WARNING: reserved bits are set!\n");
+        }
+
+        u16 imm = read_pram(r.pc++);
+        printf("%s #0x%04x, a%d\n", alu_str[XXX], imm & 0xFFFF, A);
+
+        alu_op(XXX, imm, A);
+        return 0;
+    }
+    if((opc & 0xF080) == 0x4000) { // ALU (rb+#offset7), aX
+        if(BIT(ooooooo_, 7)) ooooooo_ |= 0xFF80; // sign extension
+        printf("%s (rb+#0x%02x), a%d\n", alu_str[XXX], ooooooo_, A);
+
+        alu_op(XXX, read16(r.rb+ooooooo_), A);
+        return 0;
+    }
+    if((opc & 0xFEF8) == 0xD4D8) { // ALU (rb+##offset), aX
+        u16 off = read_pram(r.pc++);
+        printf("%s (rb+#0x%04x), a%d\n", alu_str[XXX], off & 0xFFFF, A);
+
+        alu_op(XXX, read16(r.rb+off), A);
         return 0;
     }
 
@@ -728,12 +718,12 @@ int run_dsp() {
             break;
 
         case 10: // round
-            printf("round: TODO!\n");
-            break;
+            printf("round (TODO)\n");
+            return 1;
 
         case 11: // pacr
-            printf("pacr: TODO!\n");
-            break;
+            printf("pacr (TODO)\n");
+            return 1;
 
         case 12: // clrr
             *aX = 0x8000;
@@ -761,6 +751,17 @@ int run_dsp() {
 
         return 0;
     }
+
+    /*___ norm ______________________________________________________________*/
+    if((opc & 0xFEC0) == 0x94C0) {
+        if(BIT(opc, 5)) {
+            printf("DSP WARNING: reserved bit was set!\n");
+        }
+
+        printf("norm (TODO)\n");
+        return 1;
+    }
+
 
     /*___ branch absolute ___________________________________________________*/
     if((opc & 0xFFC0) == 0x4180) {
@@ -842,6 +843,84 @@ int run_dsp() {
         printf("mov #0x%04x, %s\n", imm & 0xFFFF, modstt_str[modstt]);
         return 0;
     }
+
+    /*___ move shifted ______________________________________________________*/
+    if((opc & 0xFF80) == 0x0100) { 
+        printf("movs %s, %s\n", rrrrr_str[rrrrr], AB_str[AB]);
+
+        u64* ab;
+
+        switch(AB) {
+        case 0: ab = &r.b0; break;
+        case 1: ab = &r.b1; break;
+        case 2: ab = &r.a0; break;
+        case 3: ab = &r.a1; break;
+        }
+
+        s16 sv = r.sv; // sign value
+
+        if((sv >= 0) && (sv <= 36)) {
+            // XXX: Sign extension on rrrrr value!!
+            *ab = get_rrrrr_reg(rrrrr) << sv;
+            // XXX: flags
+            return 0;
+        }
+        else if((sv < 0) && (sv >= -36)) {
+            // XXX: Sign extension on rrrrr value!!
+            *ab = get_rrrrr_reg(rrrrr) >> -sv;
+            // XXX: flags
+            return 0;
+        }
+
+        printf("mov shifted: weird sv value.\n");
+        return 1;
+    }
+
+    /*___ move ______________________________________________________________*/
+    if((opc & 0xFFE0) == 0x5E00) {
+        u16 imm = read_pram(r.pc++);
+        printf("mov #0x%04x, %s (todo)\n", imm & 0xFFFF, rrrrr_str[rrrrr]);
+        // XXX: TODO
+        return 0;
+    }
+
+    /*___ reset bitfield ____________________________________________________*/
+    if((opc & 0xFFF8) == 0x4388) {
+        u16 imm = read_pram(r.pc++);
+        printf("rst #0x%04x, %s (todo)\n", imm & 0xFFFF, modstt_str[modstt]);
+        // XXX: TODO
+        return 0;
+    }
+
+    /*___ call ______________________________________________________________*/
+    if((opc & 0xFFC0) == 0x41C0) {
+        u16 imm = read_pram(r.pc++);
+        printf("call%s 0x%04x\n", cccc_str[cccc], imm, check_cccc(cccc) ? "" : "(skipped)");
+        r.sp--;
+        write16(r.sp, pc);
+        r.pc = imm;
+        return 0;
+    }
+
+    /*___ addv ______________________________________________________________*/
+    if((opc & 0xFFE0) == 0x87E0) {
+        u16 imm = read_pram(r.pc++);
+        printf("addv #0x%04x, %s (todo)\n", imm & 0xFFFF, rrrrr_str[rrrrr]);
+        // XXX: TODO
+        return 0;
+    }
+
+    /*___ load page _________________________________________________________*/
+    if((opc & 0xFF00) == 0x0400) {
+        printf("load #0x%04x, st1.page\n", vvvvvvvv << 8);
+
+        // Set lower 8 bits of st1 register.
+        r.st1 &= ~0xFF;
+        r.st1 |= vvvvvvvv;
+        return 0;
+    }
+
+
 
     printf("Unknown op: %04x\n", read_pram(r.pc-1));
     return 1;
