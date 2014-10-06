@@ -64,8 +64,8 @@ struct {
     // "banked" r-registers
     u16 r0b, r1b, r4b;
 
-    u32 pc; // 20 bits
-    u8  prpage; // program ram page? 4 bits
+    u32 pc; // 18 bits
+    u8  prpage; // program ram page? 4 or 2 bits?
 
     u16 lc; // link?
 
@@ -540,10 +540,16 @@ void alu_op(int op, u16 val, bool A) {
 int run_dsp() {
     /*
       Different instruction addressing modes:
-      (1) The opcode contains the lower 8 bits of data-addr, the st1 register contains the upper 8 bits.
+
+      (1) The opcode contains the lower 8 bits of data-addr,
+          the st1 register contains the upper 8 bits.
           Together, they form a 16-bit address for data-ram.
+
       (2) The opcode contains a 16-bit data-addr directly.
-      (3) rN registers are 16-bit addresses directly into X/Y-mem. Zmem not supported. Note: Pmem can be read!!
+
+      (3) rN registers are 16-bit addresses directly into X/Y-mem.
+          Zmem not supported. Note: Pmem can be read!!
+
       (4) rb register can contain any 16-bit data-addr. 
     */
     u16 opc = read_pram(r.pc++);
@@ -566,8 +572,10 @@ int run_dsp() {
     int AB       = (opc>>5) & 3;
     int modstt   = opc & 7;
 
-
+    /*_______________________________________________________________________*/
     /*___ alu+multiplier ____________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xE000) == 0xA000) { // ALM direct
         // Load address higher-bits from st1 status register.
         u16 addr = ((r.st1&0xFF) << 8) | dddddddd;
@@ -588,12 +596,17 @@ int run_dsp() {
         }
     }
     if((opc & 0xE0E0) == 0x8090) { // ALM register
-        printf("%s r%d, a%d            ;; r%d = 0x%02x\n", alm_str[XXXX], nnn, rrrrr_str[rrrrr], nnn, r.r[nnn] & 0xFFFF);
+        printf("%s r%d, a%d            ;; r%d = 0x%02x\n",
+            alm_str[XXXX], nnn, rrrrr_str[rrrrr], nnn, r.r[nnn] & 0xFFFF);
+
         alm_op(XXXX, get_rrrrr_reg(rrrrr), get_rrrrr_reg_se(rrrrr), A);
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ alu _______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xF000) == 0xC000) { // ALU #short imm
         printf("%s #0x%02x, a%d\n", alu_str[XXX], vvvvvvvv, A);
         alu_op(XXX, vvvvvvvv, A);
@@ -624,8 +637,18 @@ int run_dsp() {
         alu_op(XXX, read16(r.rb+off), A);
         return 0;
     }
+    if((opc & 0xFEF8) == 0xD4F8) { // ALU [##direct add.],aX
+        u16 direct = read_pram(r.pc++);
+        printf("%s #0x%02, a%d\n", alu_str[XXX], direct & 0xFFFF, A);
 
+        alu_op(XXX, read16(direct), A);
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
     /*___ modify aX _________________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xEF00) == 0x6700) { // moda
         printf("%s%s a%d %s\n", moda_str[ffff], cccc_str[cccc], A_, check_cccc(cccc) ? "" : "(skipped)");
 
@@ -677,7 +700,7 @@ int run_dsp() {
 
         case 3: // shl4
             if(BIT(*aX, 32)) set_c(); else clr_c(); // carry flag
-            if(BIT(*aX, 32) != BIT(*aX, 31)) set_v(); else clr_v(); // overflow flag (???)
+            if(BIT(*aX, 32) != BIT(*aX, 31)) set_v(); else clr_v(); // overflow flag (?)
             if(ARITHMETIC_SHIFTMODE && (*aX & 0xF00000000ull)) set_l();
 
             *aX = (*aX<<4) & 0xFFFFFFFFFull;
@@ -752,7 +775,10 @@ int run_dsp() {
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ norm ______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xFEC0) == 0x94C0) {
         if(BIT(opc, 5)) {
             printf("DSP WARNING: reserved bit was set!\n");
@@ -762,8 +788,369 @@ int run_dsp() {
         return 1;
     }
 
+    /*_______________________________________________________________________*/
+    /*___ divs ______________________________________________________________*/
+    /*_______________________________________________________________________*/
 
+    if((opc & 0xFE00) == 0x0E00) {
+        printf("divs (TODO)\n");
+        return 1;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ alb _______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xF1E0) == 0x80E0) {
+        printf("alb instruction (TODO)\n"); // (rN)
+        return 1;
+    }
+    if((opc & 0xF1E0) == 0x81E0) {
+        printf("alb instruction (TODO)\n"); // register
+        return 1;
+    }
+    if((opc & 0xF100) == 0xE100) {
+        printf("alb instruction (TODO)\n"); // direct
+        r.pc++;//XXX
+        return 1;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ maxd ______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xFCE0) == 0x8060) {
+        if(opc & 7) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("maxd (TODO)\n");
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ max _______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xFCE0) == 0x8460) {
+        if(opc & 7) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("max (TODO)\n");
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ min _______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xF8E0) == 0x8860) {
+        if((opc & 7) || BIT(opc, 10)) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("min (TODO)\n");
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ lim _______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xFFC0) == 0x49C0) {
+        if(opc & 15) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("lim (TODO)\n");
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ mul _______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xF0E0) == 0x8020) { // y, (rN)
+        printf("mul (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xF0E0) == 0x8040) { // y, register
+        printf("mul (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xF080) == 0xD000) { // (rJ, rI)
+        printf("mul (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xF080) == 0xD000) { // (rN), #long imm
+        printf("mul (TODO)\n");
+        r.pc++;//XXX
+        return 0;
+    }
+    if((opc & 0xF100) == 0xE000) { // y, direct addr
+        printf("mul (TODO)\n");
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ mpyi ______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xFF00) == 0x0800) {
+        printf("mpyi (TODO)\n");
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ msu _______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xFEC0) == 0x90C0) { // (rN), ##long imm
+        if(BIT(opc, 7)) {
+            printf("DSP WARNING: reversed bit was set!\n");
+        }
+
+        printf("msu (TODO)\n");
+        r.pc++;//XXX
+        return 0;
+    }
+    if((opc & 0xFE80) == 0xD080) {
+        printf("msu (TODO)\n"); // (rJ), (rI)
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ tstb ______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xF0E0) == 0x9020) {
+        printf("tstb (TODO)\n"); // (rN)
+        return 0;
+    }
+    if((opc & 0xF0E0) == 0x9000) {
+        printf("tstb (TODO)\n"); // register
+        return 0;
+    }
+    if((opc & 0xF000) == 0xF000) {
+        printf("tstb (TODO)\n"); // direct address
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ shfc ______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xF390) == 0xD280) {
+        printf("shfc (TODO)\n"); 
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ shfi ______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xF240) == 0x9240) {
+        printf("shfi (TODO)\n"); 
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ modb ______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xEF00) == 0x6F00) {
+        if(BIT(opc, 7)) {
+            printf("DSP WARNING: reserved bit was set!\n");
+        }
+
+        printf("modb (TODO)\n");
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
+    /*___ exp _______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
+    if((opc & 0xFEC0) == 0x9840) { // (rN), aX
+        if(BIT(opc, 5)) {
+            printf("DSP WARNING: reserved bit was set!\n");
+        }
+
+        printf("exp (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFEE0) == 0x9040) { // register, aX
+        printf("exp (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFEE0) == 0x9060) { // bX, aX
+        if((opc >> 1) & 0xF) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("exp (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFEC0) == 0x9C40) { // (rN), sv
+        if(BIT(opc, 5) || BIT(opc, 8)) {
+            printf("DSP WARNING: reserved bit was set!\n");
+        }
+
+        printf("exp (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFEE0) == 0x9440) { // register, sv
+        if(BIT(opc, 8)) {
+            printf("DSP WARNING: reserved bit was set!\n");
+        }
+
+        printf("exp (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFEE0) == 0x9460) { // bx, sv
+        if(BIT(opc, 8)) {
+            printf("DSP WARNING: reserved bit was set!\n");
+        }
+
+        printf("exp (TODO)\n");
+        return 0;
+    }
+
+    /*___ mov ________________________________________________________________*/
+    if((opc & 0xFC00) == 0x5800) { // register, register
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xF398) == 0xD290) { // ab, AB
+        if(opc & 0x7) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xF3D8) == 0xD298) { // ABI, dvm
+        if(opc & 0x7 || BIT(opc, 6)) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xF3D8) == 0xD2D8) { // ABI, x
+        if(opc & 0x7 || BIT(opc, 6)) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFFC0) == 0x5EC0) { // register, bX
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFFC0) == 0x5E80) { // register, mixp
+        if(BIT(opc, 6)) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFC00) == 0x1800) { // register, (rN)
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFFE0) == 0x47C0) { // mixp, register
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFE9B) == 0xD490) { // repc, AB
+        if(BIT(opc, 3) || BIT(opc, 8)) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFE9B) == 0xD491) { // dvm, AB
+        if(BIT(opc, 3) || BIT(opc, 8)) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFE9B) == 0xD492) { // icr, AB
+        if(BIT(opc, 3) || BIT(opc, 8)) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFE9B) == 0xD493) { // x, AB
+        if(BIT(opc, 3) || BIT(opc, 8)) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFC00) == 0x1C00) { // (rN), register)
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFEC0) == 0x98C0) { // (rN), bX
+        if(BIT(opc, 5)) {
+            printf("DSP WARNING: reserved bits were set!\n");
+        }
+
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFFE0) == 0x47E0) { // (sp), register
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xF100) == 0x2000) { // rN*, direct
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xF100) == 0x3000) { // ABLH, direct
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xE300) == 0x6000) { // direct, rN*
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xE700) == 0x6100) { // direct, AB
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xE300) == 0x6200) { // direct, ABLH
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xEF00) == 0x6500) { // direct, aXHeu
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFF00) == 0x6D00) { // direct, sv
+        printf("mov (TODO)\n");
+        return 0;
+    }
+    if((opc & 0xFF00) == 0x7D00) { // sv, direct
+        printf("mov (TODO)\n");
+        return 0;
+    }
+
+    /*_______________________________________________________________________*/
     /*___ branch absolute ___________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xFFC0) == 0x4180) {
         printf("br%s 0x%04x %s\n", cccc_str[cccc], read_pram(r.pc), check_cccc(cccc) ? "" : "(skipped)");
 
@@ -774,7 +1161,10 @@ int run_dsp() {
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ branch relative ___________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xF800) == 0x5000) {
         printf("brr%s 0x%04x %s\n", cccc_str[cccc], r.pc+ooooooo, check_cccc(cccc) ? "" : "(skipped)");
 
@@ -786,13 +1176,19 @@ int run_dsp() {
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ nop _______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & (~0x1F)) == 0) {
         printf("nop\n");
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ trap ______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if(opc == 0x0020) {
         // XXX: TODO
         printf("trap\n");
@@ -800,28 +1196,40 @@ int run_dsp() {
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ cntx ______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xFFC0) == 0xD380) {
         // XXX: TODO
         printf("cntx\n");
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ enable interrupt __________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if(opc == 0x4380) {
         r.st0 |= 2;
         printf("eint\n");
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ disable interrupt _________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if(opc == 0x43C0) {
         r.st0 &= ~2;
         printf("dint\n");
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ modify rN _________________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xFF80) == 0x80) {
         // XXX: TODO
         printf("modr\n");
@@ -836,7 +1244,10 @@ int run_dsp() {
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ mov pp (unknown reg) ______________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xFFF8) == 0x0030) {
         u16 imm = read_pram(r.pc++);
         // XXX: TODO
@@ -844,7 +1255,10 @@ int run_dsp() {
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ move shifted ______________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xFF80) == 0x0100) { 
         printf("movs %s, %s\n", rrrrr_str[rrrrr], AB_str[AB]);
 
@@ -876,7 +1290,10 @@ int run_dsp() {
         return 1;
     }
 
+    /*_______________________________________________________________________*/
     /*___ move ______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xFFE0) == 0x5E00) {
         u16 imm = read_pram(r.pc++);
         printf("mov #0x%04x, %s (todo)\n", imm & 0xFFFF, rrrrr_str[rrrrr]);
@@ -884,7 +1301,10 @@ int run_dsp() {
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ reset bitfield ____________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xFFF8) == 0x4388) {
         u16 imm = read_pram(r.pc++);
         printf("rst #0x%04x, %s (todo)\n", imm & 0xFFFF, modstt_str[modstt]);
@@ -892,7 +1312,10 @@ int run_dsp() {
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ call ______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xFFC0) == 0x41C0) {
         u16 imm = read_pram(r.pc++);
         printf("call%s 0x%04x\n", cccc_str[cccc], imm, check_cccc(cccc) ? "" : "(skipped)");
@@ -902,7 +1325,10 @@ int run_dsp() {
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ addv ______________________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xFFE0) == 0x87E0) {
         u16 imm = read_pram(r.pc++);
         printf("addv #0x%04x, %s (todo)\n", imm & 0xFFFF, rrrrr_str[rrrrr]);
@@ -910,7 +1336,10 @@ int run_dsp() {
         return 0;
     }
 
+    /*_______________________________________________________________________*/
     /*___ load page _________________________________________________________*/
+    /*_______________________________________________________________________*/
+
     if((opc & 0xFF00) == 0x0400) {
         printf("load #0x%04x, st1.page\n", vvvvvvvv << 8);
 
@@ -941,11 +1370,11 @@ int load_firm(u8* p, size_t len) {
     printf("Memory layout:\n");
     for(i=0; i<8; i++) {
         if((1<<i) & hdr->layout)
-            printf("   0x%08x [A]\n", 0x1FF00000 + 0x8000*i);
+            printf("   0x%08x [PROGRAM]\n", 0x1FF00000 + 0x8000*i);
     }
     for(i=8; i<16; i++) {
         if((1<<i) & hdr->layout)
-            printf("   0x%08x [B]\n", 0x1FF00000 + 0x8000*i);
+            printf("   0x%08x [DATA]\n", 0x1FF00000 + 0x8000*i);
     }
     printf("\n");
 
@@ -960,27 +1389,31 @@ int load_firm(u8* p, size_t len) {
 
     for(i=0; i<hdr->num_segments; i++) {
         printf("Segment %d:\n", i);
-        printf("   offset: 0x%x\n", hdr->segments[i].offset);
+        //printf("   offset: 0x%x\n", hdr->segments[i].offset);
         printf("   base:   0x%x\n", hdr->segments[i].base);
         printf("   size:   0x%x\n", hdr->segments[i].size);
-        printf("   type:   %x\n", hdr->segments[i].type & 0xFF);
+        u8 type = hdr->segments[i].type & 0xFF;
+        const char* type_s = "";
 
-        u8 type = hdr->segments[i].type;
         switch(type) {
         case 0:
             memcpy(&ram[hdr->segments[i].base],
                    p + hdr->segments[i].offset,
                    hdr->segments[i].size);
+            type_s = "PROGRAM";
             break;
         case 2:
             memcpy(&ram[hdr->segments[i].base+RAM_SIZE/4],
                    p + hdr->segments[i].offset,
                    hdr->segments[i].size);
+            type_s = "DATA";
             break;
         default:
             printf("Unknown type 0x%x\n", type);
             return 5;
         }
+
+        printf("   type:   %x (%s)\n", type, type_s);
     }
     printf("\n");
 
